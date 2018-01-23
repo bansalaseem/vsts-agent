@@ -112,7 +112,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         private IStep GetContainerStartStep(Pipelines.ContainerReference container)
         {
             ArgUtil.NotNull(container, nameof(container));
-            if (container.Type.ToLowerInvariant().Equals("docker", StringComparison.OrdinalIgnoreCase))
+            if (!container.Type.ToLowerInvariant().Equals("docker", StringComparison.OrdinalIgnoreCase))
             {
                 throw new NotSupportedException(container.Type);
             }
@@ -125,7 +125,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         private IStep GetContainerStopStep(Pipelines.ContainerReference container)
         {
             ArgUtil.NotNull(container, nameof(container));
-            if (container.Type.ToLowerInvariant().Equals("docker", StringComparison.OrdinalIgnoreCase))
+            if (!container.Type.ToLowerInvariant().Equals("docker", StringComparison.OrdinalIgnoreCase))
             {
                 throw new NotSupportedException(container.Type);
             }
@@ -157,7 +157,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         }
     }
 #else
-    public class LinuxContainerOperationProvider : AgentService, IContainerOperationProvider
+    public class LinuxContainerOperationProvider : ContainerOperationProvider
     {
         private IDockerCommandManager _dockerManger;
 
