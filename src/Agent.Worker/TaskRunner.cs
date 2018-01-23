@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.TeamFoundation.DistributedTask.Orchestration.Server.Expressions;
+using Microsoft.TeamFoundation.DistributedTask.ServiceEndpoints;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
 using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 using Microsoft.VisualStudio.Services.Agent.Util;
@@ -32,7 +33,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
         public INode Condition { get; set; }
 
-        public Pipelines.ContainerReference Container => Task?.Container;
+        public String Container => Task?.Container;
 
         public bool ContinueOnError => Task?.ContinueOnError ?? default(bool);
 
@@ -267,7 +268,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             {
                 // Make sure required container is already created.
                 ArgUtil.NotNull(ExecutionContext.Containers, nameof(ExecutionContext.Containers));
-                ExecutionContext.Containers.TryGetValue(Container.Name, out ContainerInfo container);
+                ExecutionContext.Containers.TryGetValue(Container, out ContainerInfo container);
                 ArgUtil.NotNull(container, nameof(container));
                 ArgUtil.NotNullOrEmpty(container.ContainerId, nameof(container.ContainerId));
 

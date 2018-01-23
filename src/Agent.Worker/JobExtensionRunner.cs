@@ -30,7 +30,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         public bool Enabled => true;
         public IExecutionContext ExecutionContext { get; set; }
         public TimeSpan? Timeout => null;
-        public Pipelines.ContainerReference Container => null;
+        public string Container => null;
         public async Task RunAsync()
         {
             await _runAsync(ExecutionContext, _data);

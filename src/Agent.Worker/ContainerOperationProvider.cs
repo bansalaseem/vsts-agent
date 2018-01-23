@@ -19,32 +19,128 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 #endif
     public interface IContainerOperationProvider : IAgentService
     {
-        IStep GetContainerStartStep(IExecutionContext jobContext, Pipelines.ContainerReference container);
-        IStep GetContainerStopStep(IExecutionContext jobContext, Pipelines.ContainerReference container);
-        // void GetHandlerContainerExecutionCommandline(ContainerInfo container, string filePath, string arguments, string workingDirectory, IDictionary<string, string> environment, out string containerEnginePath, out string containerExecutionArgs);
+        void SetupContainerSteps(List<IStep> steps, List<Pipelines.ContainerReference> containers);
+        // IStep GetContainerStartStep(Pipelines.ContainerReference container);
+        // IStep GetContainerStopStep(Pipelines.ContainerReference container);
     }
 
-#if OS_WINDOWS
-    public class WindowsContainerOperationProvider : AgentService, IContainerOperationProvider
+    public abstract class ContainerOperationProvider : AgentService, IContainerOperationProvider
     {
-        public IStep GetContainerStartStep(IExecutionContext jobContext, Pipelines.ContainerReference container)
+        public abstract Task StartContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data);
+        public abstract Task StopContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data);
+        public void SetupContainerSteps(List<IStep> steps, List<Pipelines.ContainerReference> containers)
+        {
+            ArgUtil.NotNull(steps, nameof(steps));
+            ArgUtil.NotNull(containers, nameof(containers));
+
+            // Inject container create/start steps to the jobSteps list.
+            // tracking how many different containers will be used and how many times each container will be used in multiple steps.      
+            // we will create required container just in time and also shutdown container as soon as the last step that need the container is finished.                      
+            Dictionary<string, int> containerUsage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            List<IStep> jobStepsWithContainerCreated = new List<IStep>();
+            foreach (var step in steps)
+            {
+                if (!string.IsNullOrEmpty(step.Container))
+                {
+                    if (!containerUsage.ContainsKey(step.Container))
+                    {
+                        containerUsage[step.Container] = 1;
+                        var container = containers.Single(x => x.Name.Equals(step.Container, StringComparison.OrdinalIgnoreCase));
+                        if (step is ITaskRunner)
+                        {
+                            jobStepsWithContainerCreated.Add(GetContainerStartStep(container));
+                        }
+                        else if (step is IGroupRunner)
+                        {
+                            var groupRunner = step as IGroupRunner;
+                            groupRunner.Steps.Insert(0, GetContainerStartStep(container));
+                        }
+                    }
+                    else
+                    {
+                        containerUsage[step.Container]++;
+                    }
+                }
+
+                jobStepsWithContainerCreated.Add(step);
+            }
+
+            // Tracing
+            foreach (var container in containerUsage)
+            {
+                Trace.Verbose($"Container: '{container.Key}' --- {container.Value} times");
+            }
+
+            // Inject container stop steps to the jobSteps list.
+            List<IStep> jobStepsWithContainerShutdown = new List<IStep>();
+            foreach (var step in jobStepsWithContainerCreated)
+            {
+                if (!string.IsNullOrEmpty(step.Container))
+                {
+                    containerUsage[step.Container]--;
+                    if (containerUsage[step.Container] == 0)
+                    {
+                        // Last one
+                        var container = containers.Single(x => x.Name.Equals(step.Container, StringComparison.OrdinalIgnoreCase));
+                        if (step is ITaskRunner)
+                        {
+                            jobStepsWithContainerShutdown.Add(step);
+                            jobStepsWithContainerShutdown.Add(GetContainerStopStep(container));
+                        }
+                        else if (step is IGroupRunner)
+                        {
+                            var groupRunner = step as IGroupRunner;
+                            groupRunner.Steps.Add(GetContainerStopStep(container));
+                            jobStepsWithContainerShutdown.Add(groupRunner);
+                        }
+                    }
+                    else
+                    {
+                        jobStepsWithContainerShutdown.Add(step);
+                    }
+                }
+                else
+                {
+                    jobStepsWithContainerShutdown.Add(step);
+                }
+            }
+
+            steps.Clear();
+            steps.AddRange(jobStepsWithContainerShutdown);
+        }
+
+        private IStep GetContainerStartStep(Pipelines.ContainerReference container)
         {
             ArgUtil.NotNull(container, nameof(container));
+            if (container.Type.ToLowerInvariant().Equals("docker", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new NotSupportedException(container.Type);
+            }
+
             Dictionary<string, string> data = new Dictionary<string, string>(container.Data, StringComparer.OrdinalIgnoreCase);
-            data["image"] = container.Image;
             data["name"] = container.Name;
             return new JobExtensionRunner(data: data, runAsync: StartContainerAsync, condition: ExpressionManager.Succeeded, displayName: StringUtil.Loc("InitializeContainer"));
         }
 
-        public IStep GetContainerStopStep(IExecutionContext jobContext, Pipelines.ContainerReference container)
+        private IStep GetContainerStopStep(Pipelines.ContainerReference container)
         {
+            ArgUtil.NotNull(container, nameof(container));
+            if (container.Type.ToLowerInvariant().Equals("docker", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new NotSupportedException(container.Type);
+            }
+
             Dictionary<string, string> data = new Dictionary<string, string>(container.Data, StringComparer.OrdinalIgnoreCase);
-            data["image"] = container.Image;
             data["name"] = container.Name;
             return new JobExtensionRunner(data: data, runAsync: StopContainerAsync, condition: ExpressionManager.Always, displayName: StringUtil.Loc("StopContainer"));
         }
 
-        private Task StartContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data)
+    }
+
+#if OS_WINDOWS
+    public class WindowsContainerOperationProvider : ContainerOperationProvider
+    {        
+        public override Task StartContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data)
         {
             Trace.Entering();
             ArgUtil.NotNull(executionContext, nameof(executionContext));
@@ -52,7 +148,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             return Task.CompletedTask;
         }
 
-        private Task StopContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data)
+        public override Task StopContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data)
         {
             Trace.Entering();
             ArgUtil.NotNull(executionContext, nameof(executionContext));
@@ -70,52 +166,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             base.Initialize(hostContext);
             _dockerManger = HostContext.GetService<IDockerCommandManager>();
         }
-        public IStep GetContainerStartStep(IExecutionContext context, Pipelines.ContainerReference container)
-        {
-            ArgUtil.NotNull(container, nameof(container));
-            Dictionary<string, string> data = new Dictionary<string, string>(container.Data, StringComparer.OrdinalIgnoreCase);
-            data["image"] = container.Image;
-            data["name"] = container.Name;
-            return new JobExtensionRunner(data: data, runAsync: StartContainerAsync, condition: ExpressionManager.Succeeded, displayName: StringUtil.Loc("InitializeContainer"));
-        }
 
-        public IStep GetContainerStopStep(IExecutionContext ontext, Pipelines.ContainerReference container)
-        {
-            Dictionary<string, string> data = new Dictionary<string, string>(container.Data, StringComparer.OrdinalIgnoreCase);
-            data["image"] = container.Image;
-            data["name"] = container.Name;
-            return new JobExtensionRunner(data: data, runAsync: StopContainerAsync, condition: ExpressionManager.Always, displayName: StringUtil.Loc("StopContainer"));
-        }
-
-        public void GetHandlerContainerExecutionCommandline(
-            ContainerInfo container,
-            string filePath,
-            string arguments,
-            string workingDirectory,
-            IDictionary<string, string> environment,
-            out string containerEnginePath,
-            out string containerExecutionArgs)
-        {
-            string envOptions = "";
-            foreach (var env in environment)
-            {
-                envOptions += $" -e \"{env.Key}={env.Value.Replace("\"", "\\\"")}\"";
-            }
-
-            // we need cd to the workingDir then run the executable with args.
-            // bash -c "cd \"workingDirectory\"; \"filePath\" \"arguments\""
-            string workingDirectoryEscaped = StringUtil.Format(@"\""{0}\""", workingDirectory.Replace(@"""", @"\\\"""));
-            string filePathEscaped = StringUtil.Format(@"\""{0}\""", filePath.Replace(@"""", @"\\\"""));
-            string argumentsEscaped = arguments.Replace(@"\", @"\\").Replace(@"""", @"\""");
-            string bashCommandLine = $"bash -c \"cd {workingDirectoryEscaped}&{filePathEscaped} {argumentsEscaped}\"";
-
-            arguments = $"exec -u {container.CurrentUserId} {envOptions} {container.ContainerId} {bashCommandLine}";
-
-            containerEnginePath = _dockerManger.DockerPath;
-            containerExecutionArgs = arguments;
-        }
-
-        private async Task StartContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data)
+        public override async Task StartContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data)
         {
             Trace.Entering();
             ArgUtil.NotNull(executionContext, nameof(executionContext));
@@ -320,7 +372,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
         }
 
-        private async Task StopContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data)
+        public override async Task StopContainerAsync(IExecutionContext executionContext, Dictionary<string, string> data)
         {
             Trace.Entering();
             ArgUtil.NotNull(executionContext, nameof(executionContext));

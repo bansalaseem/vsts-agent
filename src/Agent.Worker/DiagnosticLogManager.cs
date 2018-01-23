@@ -178,7 +178,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         }
 
 #if OS_WINDOWS
-        private async Task<string> GetEnvironmentContent(int agentId, string agentName, ReadOnlyCollection<Pipelines.JobStep> steps)
+        private async Task<string> GetEnvironmentContent(int agentId, string agentName, IReadOnlyCollection<Pipelines.JobStep> steps)
         {
             var builder = new StringBuilder();
 
@@ -279,7 +279,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             return builder.ToString();
         }
 #else
-        private string GetEnvironmentContent(int agentId, string agentName, ReadOnlyCollection<Pipelines.JobStep> steps)
+        private string GetEnvironmentContent(int agentId, string agentName, IReadOnlyCollection<Pipelines.JobStep> steps)
         {
             var builder = new StringBuilder();
 

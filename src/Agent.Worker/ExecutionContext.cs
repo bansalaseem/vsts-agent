@@ -1,3 +1,4 @@
+using Microsoft.TeamFoundation.DistributedTask.ServiceEndpoints;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
 using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 using Microsoft.VisualStudio.Services.Agent.Util;
@@ -38,7 +39,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         // Initialize
         void InitializeJob(Pipelines.AgentJobRequestMessage message, CancellationToken token);
         void CancelToken();
-        IExecutionContext CreateChild(Guid recordId, string displayName, string refName, Variables taskVariables = null);
+        IExecutionContext CreateChild(Guid recordId, string displayName, string refName, Variables taskVariables = null, Variables variables = null);
 
         // logging
         bool WriteDebug { get; }
@@ -136,14 +137,13 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             _cancellationTokenSource.Cancel();
         }
 
-        public IExecutionContext CreateChild(Guid recordId, string displayName, string refName, Variables taskVariables = null)
+        public IExecutionContext CreateChild(Guid recordId, string displayName, string refName, Variables taskVariables = null, Variables variables = null)
         {
             Trace.Entering();
 
             var child = new ExecutionContext();
             child.Initialize(HostContext);
             child.Features = Features;
-            child.Variables = Variables;
             child.Endpoints = Endpoints;
             child.SecureFiles = SecureFiles;
             child.TaskVariables = taskVariables;
@@ -152,6 +152,15 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             child._parentExecutionContext = this;
             child.PrependPath = PrependPath;
             child.Containers = Containers;
+
+            if (variables != null)
+            {
+                child.Variables = variables;
+            }
+            else
+            {
+                child.Variables = Variables;
+            }
 
             child.InitializeTimelineRecord(_mainTimelineId, recordId, _record.Id, ExecutionContextType.Task, displayName, refName, ++_childTimelineRecordOrder);
 

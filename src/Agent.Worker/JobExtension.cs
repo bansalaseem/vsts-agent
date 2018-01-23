@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.TeamFoundation.DistributedTask.Orchestration.Server.Expressions;
+using Microsoft.TeamFoundation.DistributedTask.ServiceEndpoints;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
 using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 using Microsoft.VisualStudio.Services.Agent.Util;
@@ -84,7 +85,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     // In order to create a flat list of timeline record for each step,
                     // we need expand all GroupStep/WrapperTask/ContainerStep first,
                     // then assign ExecutionContext for them.
-                    jobSteps = BuildJobSteps(context, message.Steps);
+                    jobSteps = BuildJobSteps(context, message);
 
                     // create task execution context for all job steps
                     foreach (var step in jobSteps)
@@ -119,7 +120,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
         }
 
-        private List<IStep> BuildJobSteps(IExecutionContext context, IList<Pipelines.JobStep> steps)
+        private List<IStep> BuildJobSteps(IExecutionContext context, Pipelines.AgentJobRequestMessage message)
         {
             StepsBuilder jobStepsBuilder = new StepsBuilder();
 
@@ -127,7 +128,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             Trace.Info("Parsing all steps' condition inputs.");
             var expression = HostContext.GetService<IExpressionManager>();
             Dictionary<Guid, INode> stepConditionMap = new Dictionary<Guid, INode>();
-            foreach (var step in steps)
+            foreach (var step in message.Steps)
             {
                 INode condition;
                 if (!string.IsNullOrEmpty(step.Condition))
@@ -169,16 +170,21 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 imageName = Environment.GetEnvironmentVariable("_PREVIEW_VSTS_DOCKER_IMAGE");
             }
 
-            if (!string.IsNullOrEmpty(imageName) && !steps.Any(x => !string.IsNullOrEmpty(x.Container?.Image)))
+            // The preview variable only take affect when none of step has container declared (compat for hosted linux pool)
+            if (!string.IsNullOrEmpty(imageName) && !message.Steps.Any(x => !string.IsNullOrEmpty(x.Container)))
             {
-                foreach (var step in steps)
+                foreach (var step in message.Steps)
                 {
-                    step.Container = new Pipelines.ContainerReference()
-                    {
-                        Name = "VSTS_Container",
-                        Image = imageName,
-                    };
+                    step.Container = "vsts_container";
                 }
+
+                var dockerContainer = new Pipelines.ContainerReference()
+                {
+                    Name = "vsts_container",
+                    Type = "docker"
+                };
+                dockerContainer.Data["image"] = imageName;
+                message.Containers.Add(dockerContainer);
             }
 
 #if OS_WINDOWS
@@ -218,7 +224,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             // Build up a basic list of steps for the job, expand group step, expand warpper task
             var taskManager = HostContext.GetService<ITaskManager>();
-            foreach (var step in steps)
+            foreach (var step in message.Steps)
             {
                 if (step.Type == Pipelines.StepType.Task)
                 {
@@ -307,78 +313,11 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 jobStepsBuilder.AddPostStep(extensionPostJobStep);
             }
 
-            // Inject container create/start steps to the jobSteps list.
-            // tracking how many different containers will be used and how many times each container will be used in multiple steps.      
-            // we will create required container just in time and also shutdown container as soon as the last step that need the container is finished.                      
-            Dictionary<string, int> containerUsage = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            // Add container related operation into 
             var containerProvider = HostContext.GetService<IContainerOperationProvider>();
-            List<IStep> jobStepsWithContainerCreated = new List<IStep>();
-            foreach (var step in jobStepsBuilder.Result)
-            {
-                if (!string.IsNullOrEmpty(step.Container?.Name))
-                {
-                    if (!containerUsage.ContainsKey(step.Container.Name))
-                    {
-                        containerUsage[step.Container.Name] = 1;
-                        if (step is ITaskRunner)
-                        {
-                            jobStepsWithContainerCreated.Add(containerProvider.GetContainerStartStep(context, step.Container));
-                        }
-                        else if (step is IGroupRunner)
-                        {
-                            var groupRunner = step as IGroupRunner;
-                            groupRunner.Steps.Insert(0, containerProvider.GetContainerStartStep(context, step.Container));
-                        }
-                    }
-                    else
-                    {
-                        containerUsage[step.Container.Name]++;
-                    }
-                }
+            containerProvider.SetupContainerSteps(jobStepsBuilder.Result, message.Containers);
 
-                jobStepsWithContainerCreated.Add(step);
-            }
-
-            // Tracing
-            foreach (var container in containerUsage)
-            {
-                Trace.Verbose($"Container: '{container.Key}' --- {container.Value} times");
-            }
-
-            // Inject container stop steps to the jobSteps list.
-            List<IStep> jobStepsWithContainerShutdown = new List<IStep>();
-            foreach (var step in jobStepsWithContainerCreated)
-            {
-                if (!string.IsNullOrEmpty(step.Container?.Name))
-                {
-                    containerUsage[step.Container.Name]--;
-                    if (containerUsage[step.Container.Name] == 0)
-                    {
-                        // Last one
-                        if (step is ITaskRunner)
-                        {
-                            jobStepsWithContainerShutdown.Add(step);
-                            jobStepsWithContainerShutdown.Add(containerProvider.GetContainerStopStep(context, step.Container));
-                        }
-                        else if (step is IGroupRunner)
-                        {
-                            var groupRunner = step as IGroupRunner;
-                            groupRunner.Steps.Add(containerProvider.GetContainerStopStep(context, step.Container));
-                            jobStepsWithContainerShutdown.Add(groupRunner);
-                        }
-                    }
-                    else
-                    {
-                        jobStepsWithContainerShutdown.Add(step);
-                    }
-                }
-                else
-                {
-                    jobStepsWithContainerShutdown.Add(step);
-                }
-            }
-
-            return jobStepsWithContainerShutdown;
+            return jobStepsBuilder.Result;
         }
     }
 

@@ -1,3 +1,4 @@
+using Microsoft.TeamFoundation.DistributedTask.ServiceEndpoints;
 using Microsoft.TeamFoundation.DistributedTask.WebApi;
 using Pipelines = Microsoft.TeamFoundation.DistributedTask.Pipelines;
 using Microsoft.VisualStudio.Services.Agent.Util;

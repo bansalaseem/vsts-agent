@@ -12,7 +12,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     public interface IStep
     {
         Expressions.INode Condition { get; set; }
-        Pipelines.ContainerReference Container { get; }
+        String Container { get; }
         bool ContinueOnError { get; }
         string DisplayName { get; }
         bool Enabled { get; }

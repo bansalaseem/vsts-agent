@@ -38,6 +38,16 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             }
         }
 
+        private IEnumerable<KeyValuePair<string, string>> All
+        {
+            get
+            {
+                return _expanded.Values
+                    .Where(x => x.Secret)
+                    .Select(x => new KeyValuePair<string, string>(x.Name, x.Value));
+            }
+        }
+
         public Variables(IHostContext hostContext, IDictionary<string, VariableValue> copy, out List<string> warnings)
         {
             // Store/Validate args.
@@ -55,14 +65,14 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
 
             // Initialize the variable dictionary.
             List<Variable> variables = new List<Variable>();
-            foreach(var variable in copy)
+            foreach (var variable in copy)
             {
-                if(!string.IsNullOrWhiteSpace(variable.Key))
+                if (!string.IsNullOrWhiteSpace(variable.Key))
                 {
                     variables.Add(new Variable(variable.Key, variable.Value.Value, variable.Value.IsSecret));
                 }
             }
-            
+
             foreach (Variable variable in variables)
             {
                 // Store the variable. The initial secret values have already been

@@ -29,7 +29,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         public bool ContinueOnError => false;
         public bool Enabled => true;
         public TimeSpan? Timeout => null;
-        public Pipelines.ContainerReference Container => null;
+        public string Container => null;
 
         public string AccessToken { get; set; }
         public IExecutionContext ExecutionContext { get; set; }

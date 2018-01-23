@@ -293,7 +293,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Listener
             using (var workerProcessCancelTokenSource = new CancellationTokenSource())
             {
                 long requestId = message.RequestId;
-                Guid lockToken = message.LockToken;
+                Guid lockToken = Guid.Empty; // lockToken has never been used.
 
                 // start renew job request
                 Trace.Info($"Start renew job request {requestId} for job {message.JobId}.");

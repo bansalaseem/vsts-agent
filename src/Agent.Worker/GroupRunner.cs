@@ -22,9 +22,10 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
     public sealed class GroupRunner : AgentService, IGroupRunner
     {
         private List<IStep> _steps = new List<IStep>();
+        private Variables _groupVariables;
 
         public Pipelines.GroupStep Group { get; set; }
-        public Pipelines.ContainerReference Container => Group?.Container;
+        public String Container => Group?.Container;
         public List<IStep> Steps => _steps;
 
         public INode Condition { get; set; }
@@ -43,6 +44,19 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         {
             ExecutionContext = jobExecutionContext.CreateChild(Group.Id, Group.DisplayName, Group.Name);
 
+            var variables = new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase);
+            foreach (var publicVar in this.ExecutionContext.Variables.Public)
+            {
+                variables[publicVar.Key] = publicVar.Value;
+            }
+            foreach (var privateVar in this.ExecutionContext.Variables.Private)
+            {
+                variables[privateVar.Key] = privateVar.Value;
+            }
+
+            _groupVariables = new Variables(HostContext, variables, out List<string> warnings);
+            warnings?.ForEach(x => jobExecutionContext.Warning(x));
+
             foreach (var step in Steps)
             {
                 if (step is ITaskRunner)
@@ -51,21 +65,21 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     ArgUtil.NotNull(taskStep, taskStep.DisplayName);
                     if (taskStep.Stage == JobRunStage.PreScope)
                     {
-                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{StringUtil.Loc("PreGroup", taskStep.Task.DisplayName)}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id]);
+                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{StringUtil.Loc("PreGroup", taskStep.Task.DisplayName)}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id], _groupVariables);
                     }
                     else if (taskStep.Stage == JobRunStage.PostScope)
                     {
-                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{StringUtil.Loc("PostGroup", taskStep.Task.DisplayName)}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id]);
+                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{StringUtil.Loc("PostGroup", taskStep.Task.DisplayName)}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id], _groupVariables);
                     }
                     else
                     {
-                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(taskStep.Task.Id, $"{DisplayName}::{taskStep.Task.DisplayName}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id]);
+                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(taskStep.Task.Id, $"{DisplayName}::{taskStep.Task.DisplayName}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id], _groupVariables);
                     }
                 }
                 else if (step is JobExtensionRunner)
                 {
                     JobExtensionRunner extensionRunner = step as JobExtensionRunner;
-                    extensionRunner.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{extensionRunner.DisplayName}", extensionRunner.DisplayName);
+                    extensionRunner.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{extensionRunner.DisplayName}", extensionRunner.DisplayName, _groupVariables);
                 }
             }
         }
@@ -226,8 +240,8 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             {
                 foreach (var output in Group.Outputs)
                 {
-                    ExecutionContext.Debug($"Mapping task output '{output.Value}' to group output '{output.Key}'.");
-                    Variable taskOutput = ExecutionContext.Variables.GetRaw(output.Value);
+                    ExecutionContext.Debug($"Mapping task output '{output.Value}' to group output '{output.Key}'.");                    
+                    Variable taskOutput = _groupVariables.GetRaw(output.Value);
                     ExecutionContext.SetVariable(output.Key, taskOutput.Value, taskOutput.Secret, true);
                 }
             }
