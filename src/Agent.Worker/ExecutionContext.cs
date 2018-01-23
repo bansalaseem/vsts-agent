@@ -39,7 +39,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         // Initialize
         void InitializeJob(Pipelines.AgentJobRequestMessage message, CancellationToken token);
         void CancelToken();
-        IExecutionContext CreateChild(Guid recordId, string displayName, string refName, Variables taskVariables = null, Variables variables = null);
+        IExecutionContext CreateChild(Guid recordId, string displayName, string refName, Variables taskVariables = null, Variables variables = null, bool publishOutputVariables = true);
 
         // logging
         bool WriteDebug { get; }
@@ -76,6 +76,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         private int _childTimelineRecordOrder = 0;
         private CancellationTokenSource _cancellationTokenSource;
         private bool _throttlingReported = false;
+        private bool _publishOutputVariables = true;
 
         // only job level ExecutionContext will track throttling delay.
         private long _totalThrottlingDelayInMilliseconds = 0;
@@ -137,7 +138,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             _cancellationTokenSource.Cancel();
         }
 
-        public IExecutionContext CreateChild(Guid recordId, string displayName, string refName, Variables taskVariables = null, Variables variables = null)
+        public IExecutionContext CreateChild(Guid recordId, string displayName, string refName, Variables taskVariables = null, Variables variables = null, bool publishOutputVariables = true)
         {
             Trace.Entering();
 
@@ -162,6 +163,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                 child.Variables = Variables;
             }
 
+            child._publishOutputVariables = publishOutputVariables;
             child.InitializeTimelineRecord(_mainTimelineId, recordId, _record.Id, ExecutionContextType.Task, displayName, refName, ++_childTimelineRecordOrder);
 
             child._logger = HostContext.CreateService<IPagingLogger>();
@@ -226,12 +228,19 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             ArgUtil.NotNullOrEmpty(name, nameof(name));
             if (isOutput || OutputVariables.Contains(name))
             {
-                _record.Variables[name] = new VariableValue()
+                if (_publishOutputVariables)
                 {
-                    Value = value,
-                    IsSecret = isSecret
-                };
-                _jobServerQueue.QueueTimelineRecordUpdate(_mainTimelineId, _record);
+                    _record.Variables[name] = new VariableValue()
+                    {
+                        Value = value,
+                        IsSecret = isSecret
+                    };
+                    _jobServerQueue.QueueTimelineRecordUpdate(_mainTimelineId, _record);
+                }
+                else
+                {
+                    Trace.Info($"Skip {_record.Name}.{name}");
+                }
 
                 ArgUtil.NotNullOrEmpty(_record.RefName, nameof(_record.RefName));
                 Variables.Set($"{_record.RefName}.{name}", value, secret: isSecret);

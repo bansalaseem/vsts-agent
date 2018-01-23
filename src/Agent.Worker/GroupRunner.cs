@@ -43,19 +43,7 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
         public void InitializeStep(IExecutionContext jobExecutionContext, Dictionary<Guid, Variables> intraStepVariables = null)
         {
             ExecutionContext = jobExecutionContext.CreateChild(Group.Id, Group.DisplayName, Group.Name);
-
-            var variables = new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase);
-            foreach (var publicVar in this.ExecutionContext.Variables.Public)
-            {
-                variables[publicVar.Key] = publicVar.Value;
-            }
-            foreach (var privateVar in this.ExecutionContext.Variables.Private)
-            {
-                variables[privateVar.Key] = privateVar.Value;
-            }
-
-            _groupVariables = new Variables(HostContext, variables, out List<string> warnings);
-            warnings?.ForEach(x => jobExecutionContext.Warning(x));
+            _groupVariables = new Variables(HostContext, new Dictionary<string, VariableValue>(StringComparer.OrdinalIgnoreCase), out List<string> warnings);
 
             foreach (var step in Steps)
             {
@@ -65,21 +53,21 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
                     ArgUtil.NotNull(taskStep, taskStep.DisplayName);
                     if (taskStep.Stage == JobRunStage.PreScope)
                     {
-                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{StringUtil.Loc("PreGroup", taskStep.Task.DisplayName)}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id], _groupVariables);
+                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{StringUtil.Loc("PreGroup", taskStep.Task.DisplayName)}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id], _groupVariables, false);
                     }
                     else if (taskStep.Stage == JobRunStage.PostScope)
                     {
-                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{StringUtil.Loc("PostGroup", taskStep.Task.DisplayName)}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id], _groupVariables);
+                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{StringUtil.Loc("PostGroup", taskStep.Task.DisplayName)}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id], _groupVariables, false);
                     }
                     else
                     {
-                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(taskStep.Task.Id, $"{DisplayName}::{taskStep.Task.DisplayName}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id], _groupVariables);
+                        taskStep.ExecutionContext = jobExecutionContext.CreateChild(taskStep.Task.Id, $"{DisplayName}::{taskStep.Task.DisplayName}", taskStep.Task.Name, intraStepVariables[taskStep.Task.Id], _groupVariables, false);
                     }
                 }
                 else if (step is JobExtensionRunner)
                 {
                     JobExtensionRunner extensionRunner = step as JobExtensionRunner;
-                    extensionRunner.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{extensionRunner.DisplayName}", extensionRunner.DisplayName, _groupVariables);
+                    extensionRunner.ExecutionContext = jobExecutionContext.CreateChild(Guid.NewGuid(), $"{DisplayName}::{extensionRunner.DisplayName}", extensionRunner.DisplayName, null, _groupVariables, false);
                 }
             }
         }
@@ -91,6 +79,15 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             ArgUtil.NotNull(ExecutionContext, nameof(ExecutionContext));
             ArgUtil.NotNull(Group, nameof(Group));
             ArgUtil.NotNull(Steps, nameof(Steps));
+
+            foreach (var publicVar in ExecutionContext.Variables.Public)
+            {
+                _groupVariables.Set(publicVar.Key, publicVar.Value);
+            }
+            foreach (var privateVar in ExecutionContext.Variables.Private)
+            {
+                _groupVariables.Set(privateVar.Key, privateVar.Value, true);
+            }
 
             // TaskResult:
             //  Abandoned (Server set this.)
@@ -240,9 +237,17 @@ namespace Microsoft.VisualStudio.Services.Agent.Worker
             {
                 foreach (var output in Group.Outputs)
                 {
-                    ExecutionContext.Debug($"Mapping task output '{output.Value}' to group output '{output.Key}'.");                    
+                    ExecutionContext.Debug($"Mapping task output '{output.Value}' to group output '{output.Key}'.");
                     Variable taskOutput = _groupVariables.GetRaw(output.Value);
-                    ExecutionContext.SetVariable(output.Key, taskOutput.Value, taskOutput.Secret, true);
+
+                    if (taskOutput != null)
+                    {
+                        ExecutionContext.SetVariable(output.Key, taskOutput.Value, taskOutput.Secret, true);
+                    }
+                    else
+                    {
+                        ExecutionContext.Debug($"Task output '{output.Value}' is not set.");
+                    }
                 }
             }
         }
