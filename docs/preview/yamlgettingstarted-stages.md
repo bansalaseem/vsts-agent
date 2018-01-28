@@ -1,19 +1,17 @@
 # YAML getting started - Multiple stages and stage type
 
 ## Pipelines and Stages
-VSTS Pipelines defines a set of stages that get executed in sequence or in parallel. Stages in-turn group the steps into a phase and can execute the phases in sequence or in parallel. For example, you can have an overall pipeline process that comprises a build stage, followed by several deploy and test stages. You can create a separate stage to represent deployment to an environment for example, “QA” stage or “Production” stage. 
+VSTS Pipelines defines a set of stages that get executed in sequence or in parallel. Stages in-turn, group the steps into a phase and can execute the phases in sequence or in parallel. For example, you can have an overall pipeline process that comprises a build stage, followed by several deploy and test stages. You can create a separate stage to represent deployment to an environment for example, “QA” stage or “Production” stage. 
 
 ## Stage
 
-Stages represent build or release process. In CD YAML, ‘Stage’ is the equivalent of an environment. Stage is the logical and independent entity that can represent both CI and CD processes of a pipeline.  
+Stages represent build or release process. In CD YAML, ‘Stage’ is the equivalent of an environment. Stage is a logical and independent entity that can represent both CI and CD processes of a pipeline.  
 
 A stage:
 *	Has a single phase by default, but can be used to group multiple phases
 *	Can process phases in sequence or in parallel
 *	May produce artifacts that can be made available for use by subsequent stage(s). For example, a stage of type ‘build’ can produce artifacts that can be consumed by other stages in the pipeline.
 *	Can be configured to be triggered manually or can be triggered automatically upon successful completion of a prior stage. 
-
-With ability to define a build or a release as a “stage”, the experience lends itself to extend and grow the CI YAML pipelines into full-fledged CI/CD pipeline having build, test and deploy stages.  
 
 For example, a simple process may only define a build stage, (one job, one phase). User can add additional stages to define deploy, test stages including production. Users can also define pipeline sans build stage in the YAML and instead refer to a CI YAML file using templating. 
 
@@ -133,9 +131,9 @@ stages:
 
 ## Manual start for stages
 
-You can specify start type for a stage. If not specified, they are automated by default.  Stages that are manually started can be represented as `startType: manual`.
+You can specify start type for a stage. If not specified, they are automatically started by default.  Stages that are manually started can be represented as `startType: manual`.
 
-Example of a stage that is started manually after the dependencies are met. 
+Example of a stage (production) that is started manually after the dependencies are met. 
 
 ```yaml
 stages: 
